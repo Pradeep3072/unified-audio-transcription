@@ -2,6 +2,8 @@
 
 A unified transcription service combining **file-based** and **live microphone** transcription in a single codebase.
 
+![Unified Audio Transcription](unified-audio-transcription.png)
+
 ## Architecture
 
 ```
