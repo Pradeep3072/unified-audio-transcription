@@ -1,0 +1,28 @@
+# Core
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+
+# File upload transcription (openai-whisper)
+openai-whisper
+
+# Live transcription (faster-whisper)
+faster-whisper
+
+# Cloud transcription (Groq)
+groq
+
+# AI correction agent
+langchain
+langchain-groq
+
+# Live audio capture
+sounddevice
+numpy
+scipy
+
+# Frontend
+streamlit
+requests
+websocket-client
