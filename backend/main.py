@@ -1,13 +1,15 @@
 import asyncio
 import json
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query
+import time
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.services.whisper_service import WhisperService
 from backend.services.groq_whisper_service import GroqWhisperService
 from backend.services.live_transcriber import LiveTranscriber
 from backend.services.audio_capture import AudioCapture
+from backend.services.metrics_service import build_metrics
 from backend.agents.transcription_agent import TranscriptionCorrectionAgent
 
 # ==========================================
@@ -71,7 +73,8 @@ def health_check():
 async def transcribe_file(
     file: UploadFile = File(...),
     language: str = Form(None),
-    use_cloud: str = Form("false")
+    use_cloud: str = Form("false"),
+    reference_text: str = Form(None),
 ):
     """
     Upload an audio file to transcribe it.
@@ -79,6 +82,7 @@ async def transcribe_file(
     - Supports: wav, mp3, m4a, ogg, flac
     - Uses local openai-whisper by default; pass `use_cloud=true` to use Groq cloud
     - The raw transcript is then corrected and summarized by an AI agent
+    - Provide optional `reference_text` to calculate WER and CER
     """
     logger.info(f"[File] Received: {file.filename} | language={language} | cloud={use_cloud}")
 
@@ -91,12 +95,15 @@ async def transcribe_file(
     active_service = groq_whisper_service if use_cloud.lower() == "true" else whisper_service
 
     # Transcribe (run in thread to avoid blocking the event loop)
-    raw_text = await asyncio.to_thread(
+    started_at = time.perf_counter()
+    raw_text, audio_duration_sec = await asyncio.to_thread(
         active_service.transcribe,
         audio_bytes,
         whisper_lang,
         file.filename
     )
+    transcription_time_ms = (time.perf_counter() - started_at) * 1000
+    metrics = build_metrics(raw_text, audio_duration_sec, transcription_time_ms, reference_text)
 
     # Run AI correction agent
     agent_result = await asyncio.to_thread(
@@ -110,7 +117,8 @@ async def transcribe_file(
         "raw_text":       raw_text,
         "corrected_text": agent_result.get("corrected_text", ""),
         "summary":        agent_result.get("summary", ""),
-        "evaluation":     agent_result.get("evaluation")
+        "evaluation":     agent_result.get("evaluation"),
+        "metrics":        metrics.model_dump(),
     }
 
 
@@ -167,14 +175,25 @@ async def live_transcription(websocket: WebSocket):
             chunk = audio_capture.get_chunk()
             if chunk is not None:
                 try:
+                    started_at = time.perf_counter()
                     if model_choice == "cloud":
                         text = await asyncio.to_thread(live_transcriber.transcribe_cloud, chunk)
                     else:
                         text = await asyncio.to_thread(live_transcriber.transcribe_local, chunk)
+                    latency_ms = (time.perf_counter() - started_at) * 1000
 
                     if text:
                         logger.info(f"[Live] [{model_choice}] {text}")
-                        await websocket.send_json({"text": text, "model": model_choice})
+                        metrics = build_metrics(
+                            text,
+                            audio_capture.chunk_duration_sec,
+                            latency_ms,
+                        )
+                        await websocket.send_json({
+                            "text": text,
+                            "model": model_choice,
+                            "metrics": metrics.model_dump(),
+                        })
                 except Exception as e:
                     logger.error(f"[Live] process_audio error: {e}")
                     break

@@ -2,6 +2,7 @@ import os
 import tempfile
 from groq import Groq
 from dotenv import load_dotenv
+from backend.services.metrics_service import get_audio_duration_sec
 
 load_dotenv()
 
@@ -19,10 +20,10 @@ class GroqWhisperService:
             self.client = Groq(api_key=self.api_key)
         print("[GroqWhisperService] Ready.")
 
-    def transcribe(self, audio_bytes: bytes, language: str = None, filename: str = None) -> str:
+    def transcribe(self, audio_bytes: bytes, language: str = None, filename: str = None) -> tuple[str, float]:
         if not self.client:
             print("[GroqWhisperService] Error: API key missing.")
-            return ""
+            return "", 0.0
 
         temp_file = None
         try:
@@ -43,11 +44,11 @@ class GroqWhisperService:
                     kwargs["language"] = language
 
                 transcription = self.client.audio.transcriptions.create(**kwargs)
-                return transcription.text
+                return transcription.text.strip(), get_audio_duration_sec(temp_file)
 
         except Exception as e:
             print(f"[GroqWhisperService] Error: {e}")
-            return ""
+            return "", 0.0
 
         finally:
             if temp_file and os.path.exists(temp_file):

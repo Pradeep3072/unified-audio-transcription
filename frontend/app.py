@@ -127,6 +127,13 @@ with tab1:
             help="ON → Groq cloud (fast). OFF → local openai-whisper."
         )
 
+        reference_text = st.text_area(
+            "Reference text (optional)",
+            help="Provide the expected transcript to calculate WER and CER.",
+            key="file_reference_text",
+            placeholder="Paste the ground-truth transcript here…",
+        )
+
         if st.button("🔍 Check Backend", key="file_health_btn"):
             try:
                 r = requests.get(f"{BACKEND_URL}/", timeout=3)
@@ -156,6 +163,8 @@ with tab1:
                             form_data["language"] = lang_code
                         if use_cloud:
                             form_data["use_cloud"] = "true"
+                        if reference_text.strip():
+                            form_data["reference_text"] = reference_text.strip()
 
                         response = requests.post(
                             f"{BACKEND_URL}/transcribe/file",
@@ -179,6 +188,17 @@ with tab1:
                             if result.get("summary"):
                                 st.markdown("##### 📝 Summary")
                                 st.info(result["summary"])
+
+                            metrics = result.get("metrics")
+                            if metrics:
+                                st.markdown("##### 📊 Metrics")
+                                metric_cols = st.columns(6)
+                                metric_cols[0].metric("Audio duration", f"{metrics.get('audio_duration_sec', 0):.2f}s")
+                                metric_cols[1].metric("Latency", f"{metrics.get('transcription_time_ms', 0):.0f} ms")
+                                metric_cols[2].metric("RTF", f"{metrics.get('real_time_factor', 0):.2f}")
+                                metric_cols[3].metric("WPM", f"{metrics.get('words_per_minute', 0):.1f}")
+                                metric_cols[4].metric("WER", f"{metrics['wer']:.2%}" if metrics.get("wer") is not None else "N/A")
+                                metric_cols[5].metric("CER", f"{metrics['cer']:.2%}" if metrics.get("cer") is not None else "N/A")
 
                             eval_data = result.get("evaluation")
                             if eval_data:
@@ -223,6 +243,8 @@ with tab2:
         "live_default_device":  None,
         "live_model":           "local",
         "live_device_index":    None,
+        "live_chunk_metrics":   [],
+        "live_word_count":      0,
     }.items():
         if key not in st.session_state:
             st.session_state[key] = default
@@ -340,6 +362,8 @@ with tab2:
 
             if st.session_state.live_is_recording:
                 st.session_state.live_transcript = ""
+                st.session_state.live_chunk_metrics = []
+                st.session_state.live_word_count = 0
                 st.session_state.live_model = model_choice
                 ws = st.session_state.live_ws
                 ws_ok = ws and getattr(ws, "sock", None) and getattr(ws.sock, "connected", False)
@@ -394,19 +418,44 @@ with tab2:
                 msg = st.session_state.live_msg_buffer.pop(0)
                 if "text" in msg:
                     st.session_state.live_transcript += msg["text"] + " "
+                    st.session_state.live_word_count += len(msg["text"].split())
+                if "metrics" in msg:
+                    st.session_state.live_chunk_metrics.append(msg["metrics"])
                 if "status" in msg:
                     st.session_state.live_status = msg["status"]
 
             transcript_box.info(
                 st.session_state.live_transcript or "🎤 Listening… start speaking!"
             )
+            recent_metrics = st.session_state.live_chunk_metrics[-1] if st.session_state.live_chunk_metrics else None
+            with st.container(border=True):
+                st.caption("Live metrics")
+                live_metrics_cols = st.columns(3)
+                live_metrics_cols[0].metric("Chunks", len(st.session_state.live_chunk_metrics))
+                live_metrics_cols[1].metric("Words", st.session_state.live_word_count)
+                live_metrics_cols[2].metric(
+                    "Last chunk latency",
+                    f"{recent_metrics.get('transcription_time_ms', 0):.0f} ms" if recent_metrics else "—",
+                )
             time.sleep(0.5)
             st.rerun()
         else:
             if st.session_state.live_transcript:
                 transcript_box.success(st.session_state.live_transcript)
+                if st.session_state.live_chunk_metrics:
+                    average_latency = sum(
+                        metric.get("transcription_time_ms", 0)
+                        for metric in st.session_state.live_chunk_metrics
+                    ) / len(st.session_state.live_chunk_metrics)
+                    st.caption(
+                        f"{len(st.session_state.live_chunk_metrics)} chunks • "
+                        f"{st.session_state.live_word_count} words • "
+                        f"average chunk latency {average_latency:.0f} ms"
+                    )
                 if st.button("🗑️ Clear", key="live_clear"):
                     st.session_state.live_transcript = ""
+                    st.session_state.live_chunk_metrics = []
+                    st.session_state.live_word_count = 0
                     st.rerun()
             else:
                 transcript_box.write("No transcription yet. Press **▶ Start Recording** to begin.")

@@ -2,6 +2,7 @@ import whisper
 import tempfile
 import os
 from dotenv import load_dotenv
+from backend.services.metrics_service import get_audio_duration_sec
 
 load_dotenv()
 
@@ -15,10 +16,11 @@ class WhisperService:
         self.model = whisper.load_model(model_size)
         print("[WhisperService] Model loaded.")
 
-    def transcribe(self, audio_bytes: bytes, language: str = None, filename: str = None) -> str:
+    def transcribe(self, audio_bytes: bytes, language: str = None, filename: str = None) -> tuple[str, float]:
         temp_file = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            suffix = os.path.splitext(filename or "")[1] or ".wav"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
                 f.write(audio_bytes)
                 temp_file = f.name
 
@@ -31,11 +33,11 @@ class WhisperService:
 
             text = result["text"].strip()
             print(f"[WhisperService] Result: {text}")
-            return text
+            return text, get_audio_duration_sec(temp_file)
 
         except Exception as e:
             print(f"[WhisperService] Error: {e}")
-            return ""
+            return "", 0.0
 
         finally:
             if temp_file and os.path.exists(temp_file):

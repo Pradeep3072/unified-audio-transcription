@@ -29,8 +29,8 @@ Transcription-App/
 |--------|----------|-------------|
 | `GET`  | `/` | Health check |
 | `GET`  | `/devices` | List available microphone input devices |
-| `POST` | `/transcribe/file` | Upload audio file → transcript + AI correction |
-| `WS`   | `/ws/transcribe/live` | Real-time live mic transcription |
+| `POST` | `/transcribe/file` | Upload audio file → transcript, AI correction, and quality/performance metrics |
+| `WS`   | `/ws/transcribe/live` | Real-time live mic transcription with per-chunk latency metrics |
 
 ## Setup
 
@@ -57,6 +57,17 @@ streamlit run frontend/app.py
 - **File Transcription** → open `http://localhost:8501` → Tab 1 → upload a `.wav/.mp3/.m4a` file
 - **Live Transcription** → Tab 2 → select microphone → click Start Recording
 - **API Docs** → `http://localhost:8000/docs`
+
+### Metrics
+
+File transcription responses include audio duration, transcription latency, real-time
+factor (RTF), word count, and words per minute. Add the optional **Reference text**
+in the UI (or `reference_text` form field in the API) to also calculate word error
+rate (WER) and character error rate (CER). Without a reference, WER and CER are
+returned as `null` / shown as `N/A`.
+
+Live transcription messages include a `metrics` object for each non-empty five-second
+audio chunk; the UI shows the latest latency, running word count, and chunk total.
 
 ## Environment Variables
 
